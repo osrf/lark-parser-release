@@ -1,0 +1,46 @@
+Source: lark-parser
+Section: python
+Priority: optional
+Maintainer: Jose Luis Rivero <jrivero@osrfoundation.org>
+Build-Depends: debhelper (>= 11), dh-python, python-all, python-setuptools, python3-all, python3-setuptools 
+X-Python3-Version: >= 3.5
+Standards-Version: 4.2.1
+Vcs-Browser: https://github.com/osrf/lark-parser-release
+Vcs-Git: https://github.com/osrf/lark-parser-release
+Homepage: https://github.com/lark-parser/lark
+
+Package: python3-lark-parser
+Architecture: all
+Multi-Arch: foreign
+Depends: ${python3:Depends}, ${misc:Depends}
+Provides: ${python3:Provides}
+Description: Lark - a modern parsing library for Python (Python 3)
+ Lark lets you choose between Earley and LALR(1), to trade-off power and speed.
+ It also contains a CYK parser and unique features such as a contextual-lexer.
+ .
+ Lark can: Parse all context-free grammars, and handle all ambiguity Build a
+ parse-tree automagically, no construction code required Outperform all other
+ Python libraries when using LALR(1) (Yes, including PLY) Run on every Python
+ interpreter (it's pure-python) Generate a stand-alone parser (for LALR(1)
+ grammars)
+ .
+ This is the Python 3 version of the package. This version installs
+ the lark-parser executable
+ 
+Package: python3-lark-parser-doc
+Section: doc
+Architecture: all
+Multi-Arch: foreign
+Suggests: python-empy
+Depends: ${misc:Depends}
+Description: Lark - a modern parsing library for Python (Documentation)
+ Lark lets you choose between Earley and LALR(1), to trade-off power and speed.
+ It also contains a CYK parser and unique features such as a contextual-lexer.
+ .
+ Lark can: Parse all context-free grammars, and handle all ambiguity Build a
+ parse-tree automagically, no construction code required Outperform all other
+ Python libraries when using LALR(1) (Yes, including PLY) Run on every Python
+ interpreter (it's pure-python) Generate a stand-alone parser (for LALR(1)
+ grammars)
+ .
+ This is the documentation package

@@ -1,0 +1,52 @@
+diff --git a/tests/test_parser.py b/tests/test_parser.py
+index a54ecc4..b8b50b3 100644
+--- a/tests/test_parser.py
++++ b/tests/test_parser.py
+@@ -267,7 +267,7 @@ def _make_full_earley_test(LEXER):
+             grammar = """
+             ANY:  /[a-zA-Z0-9 ]+/
+             a.2: "A" b+
+-            b.2: "B" 
++            b.2: "B"
+             c:   ANY
+ 
+             start: (a|c)*
+@@ -975,20 +975,6 @@ def _make_parser_test(LEXER, PARSER):
+             self.assertEqual(x.children, ['12', 'elephants'])
+ 
+ 
+-        def test_relative_import(self):
+-            grammar = """
+-            start: NUMBER WORD
+-
+-            %import .grammars.test.NUMBER
+-            %import common.WORD
+-            %import common.WS
+-            %ignore WS
+-
+-            """
+-            l = _Lark(grammar)
+-            x = l.parse('12 lions')
+-            self.assertEqual(x.children, ['12', 'lions'])
+-
+         def test_multi_import(self):
+             grammar = """
+             start: NUMBER WORD
+@@ -1002,17 +988,6 @@ def _make_parser_test(LEXER, PARSER):
+             self.assertEqual(x.children, ['12', 'toucans'])
+ 
+ 
+-        def test_relative_multi_import(self):
+-            grammar = """
+-           start: NUMBER WORD
+-
+-           %import .grammars.test (NUMBER, WORD, WS)
+-           %ignore WS
+-
+-           """
+-            l = _Lark(grammar)
+-            x = l.parse('12 capybaras')
+-            self.assertEqual(x.children, ['12', 'capybaras'])
+ 
+         def test_import_errors(self):
+             grammar = """
