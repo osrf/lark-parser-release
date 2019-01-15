@@ -43,10 +43,14 @@ class LarkOptions(object):
         postlex - Lexer post-processing (Default: None) Only works with the standard and contextual lexers.
         start - The start symbol (Default: start)
         profile - Measure run-time usage in Lark. Read results from the profiler proprety (Default: False)
+        priority - How priorities should be evaluated - auto, none, normal, invert (Default: auto)
         propagate_positions - Propagates [line, column, end_line, end_column] attributes into all tree branches.
         lexer_callbacks - Dictionary of callbacks for the lexer. May alter tokens during lexing. Use with caution.
+        maybe_placeholders - Experimental feature. Instead of omitting optional rules (i.e. rule?), replace them with None
     """
-    __doc__ += OPTIONS_DOC
+    if __doc__:
+        __doc__ += OPTIONS_DOC
+
     def __init__(self, options_dict):
         o = dict(options_dict)
 
@@ -60,9 +64,11 @@ class LarkOptions(object):
         self.transformer = o.pop('transformer', None)
         self.start = o.pop('start', 'start')
         self.profile = o.pop('profile', False)
+        self.priority = o.pop('priority', 'auto')
         self.ambiguity = o.pop('ambiguity', 'auto')
         self.propagate_positions = o.pop('propagate_positions', False)
         self.lexer_callbacks = o.pop('lexer_callbacks', {})
+        self.maybe_placeholders = o.pop('maybe_placeholders', False)
 
         assert self.parser in ('earley', 'lalr', 'cyk', None)
 
@@ -150,7 +156,16 @@ class Lark:
             disambig_parsers = ['earley', 'cyk']
             assert self.options.parser in disambig_parsers, (
                 'Only %s supports disambiguation right now') % ', '.join(disambig_parsers)
-        assert self.options.ambiguity in ('resolve', 'explicit', 'auto', 'resolve__antiscore_sum')
+        assert self.options.priority in ('auto', 'none', 'normal', 'invert'), 'invalid priority option specified: {}. options are auto, none, normal, invert.'.format(self.options.priority)
+        if self.options.priority == 'auto':
+            if self.options.parser in ('earley', 'cyk', ):
+                self.options.priority = 'normal'
+            elif self.options.parser in ('lalr', ):
+                self.options.priority = 'none'
+        if self.options.priority in ('invert', 'normal'):
+            assert self.options.parser in ('earley', 'cyk'), "priorities are not supported for LALR at this time"
+        assert self.options.ambiguity not in ('resolve__antiscore_sum', ), 'resolve__antiscore_sum has been replaced with the option priority="invert"'
+        assert self.options.ambiguity in ('resolve', 'explicit', 'auto', )
 
         # Parse the grammar file and compose the grammars (TODO)
         self.grammar = load_grammar(grammar, self.source)
@@ -158,6 +173,19 @@ class Lark:
         # Compile the EBNF grammar into BNF
         self.terminals, self.rules, self.ignore_tokens = self.grammar.compile()
 
+        # If the user asked to invert the priorities, negate them all here.
+        # This replaces the old 'resolve__antiscore_sum' option.
+        if self.options.priority == 'invert':
+            for rule in self.rules:
+                if rule.options and rule.options.priority is not None:
+                    rule.options.priority = -rule.options.priority
+        # Else, if the user asked to disable priorities, strip them from the
+        # rules. This allows the Earley parsers to skip an extra forest walk
+        # for improved performance, if you don't need them (or didn't specify any).
+        elif self.options.priority == 'none':
+            for rule in self.rules:
+                if rule.options and rule.options.priority is not None:
+                    rule.options.priority = None
         self.lexer_conf = LexerConf(self.terminals, self.ignore_tokens, self.options.postlex, self.options.lexer_callbacks)
 
         if self.options.parser:
@@ -167,7 +195,8 @@ class Lark:
 
         if self.profiler: self.profiler.enter_section('outside_lark')
 
-    __init__.__doc__ += "\nOPTIONS:" + LarkOptions.OPTIONS_DOC
+    if __init__.__doc__:
+        __init__.__doc__ += "\nOPTIONS:" + LarkOptions.OPTIONS_DOC
 
     def _build_lexer(self):
         return TraditionalLexer(self.lexer_conf.tokens, ignore=self.lexer_conf.ignore, user_callbacks=self.lexer_conf.callbacks)
@@ -175,7 +204,7 @@ class Lark:
     def _build_parser(self):
         self.parser_class = get_frontend(self.options.parser, self.options.lexer)
 
-        self._parse_tree_builder = ParseTreeBuilder(self.rules, self.options.tree_class, self.options.propagate_positions, self.options.keep_all_tokens, self.options.parser!='lalr' and self.options.ambiguity=='explicit')
+        self._parse_tree_builder = ParseTreeBuilder(self.rules, self.options.tree_class, self.options.propagate_positions, self.options.keep_all_tokens, self.options.parser!='lalr' and self.options.ambiguity=='explicit', self.options.maybe_placeholders)
         callback = self._parse_tree_builder.create_callback(self.options.transformer)
         if self.profiler:
             for f in dir(callback):
