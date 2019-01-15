@@ -1,8 +1,8 @@
 diff --git a/tests/test_parser.py b/tests/test_parser.py
-index a54ecc4..9a3bcff 100644
+index 19b09f2..4f1f1e6 100644
 --- a/tests/test_parser.py
 +++ b/tests/test_parser.py
-@@ -190,28 +190,6 @@ def _make_full_earley_test(LEXER):
+@@ -191,29 +191,6 @@ def _make_full_earley_test(LEXER):
  
  
          @unittest.skipIf(LEXER=='dynamic', "Only relevant for the dynamic_complete parser")
@@ -16,7 +16,7 @@ index a54ecc4..9a3bcff 100644
 -
 -            l = Lark(grammar, parser='earley', lexer=LEXER)
 -            res = l.parse("aaa")
--            self.assertEqual(res.children, ['aa', 'a'])
+-            self.assertEqual(res.children, ['a', 'aa'])
 -
 -        def test_earley4(self):
 -            grammar = """
@@ -26,8 +26,9 @@ index a54ecc4..9a3bcff 100644
 -
 -            l = Lark(grammar, parser='earley', lexer=LEXER)
 -            res = l.parse("aaa")
+-#            print(res.pretty())
 -            self.assertEqual(res.children, ['aaa'])
 -
          def test_earley_repeating_empty(self):
              # This was a sneaky bug!
- 
+
