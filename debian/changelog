@@ -2,6 +2,12 @@ lark-parser (0.7.0-1) bionic; urgency=medium
 
   * New upstream version 0.7.0
 
+ -- Jose Luis Rivero <jrivero@osrfoundation.org>  Fri, 29 Mar 2019 11:33:22 +0100
+
+lark-parser (0.7.0-1) bionic; urgency=medium
+
+  * New upstream version 0.7.0
+
  -- Jose Luis Rivero <jrivero@osrfoundation.org>  Fri, 29 Mar 2019 11:29:24 +0100
 
 lark-parser (0.7d+20190115~862a853-1) xenial; urgency=medium
