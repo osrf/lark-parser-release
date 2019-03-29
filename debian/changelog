@@ -1,4 +1,4 @@
-lark-parser (0.7.0-1) bionic; urgency=medium
+lark-parser (0.7.0-1) xenial; urgency=medium
 
   * New upstream version 0.7.0
 
