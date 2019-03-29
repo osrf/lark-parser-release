@@ -2,6 +2,7 @@ from functools import wraps
 
 from .utils import smart_decorator
 from .tree import Tree
+from .exceptions import VisitError, GrammarError
 
 ###{standalone
 from inspect import getmembers, getmro
@@ -28,16 +29,21 @@ class Transformer:
         except AttributeError:
             return self.__default__(tree.data, children, tree.meta)
         else:
-            if getattr(f, 'meta', False):
-                return f(children, tree.meta)
-            elif getattr(f, 'inline', False):
-                return f(*children)
-            elif getattr(f, 'whole_tree', False):
-                if new_children is not None:
-                    raise NotImplementedError("Doesn't work with the base Transformer class")
-                return f(tree)
-            else:
-                return f(children)
+            try:
+                if getattr(f, 'meta', False):
+                    return f(children, tree.meta)
+                elif getattr(f, 'inline', False):
+                    return f(*children)
+                elif getattr(f, 'whole_tree', False):
+                    if new_children is not None:
+                        raise NotImplementedError("Doesn't work with the base Transformer class")
+                    return f(tree)
+                else:
+                    return f(children)
+            except (GrammarError, Discard):
+                raise
+            except Exception as e:
+                raise VisitError(tree, e)
 
     def _transform_children(self, children):
         for c in children:
@@ -67,6 +73,8 @@ class Transformer:
         libmembers = {name for _cls in mro[1:] for name, _ in getmembers(_cls)}
         for name, value in getmembers(cls):
             if name.startswith('_') or name in libmembers:
+                continue
+            if not callable(cls.__dict__[name]):
                 continue
 
             # Skip if v_args already applied (at the function level)

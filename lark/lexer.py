@@ -71,20 +71,25 @@ class TerminalDef(object):
 class Token(Str):
     __slots__ = ('type', 'pos_in_stream', 'value', 'line', 'column', 'end_line', 'end_column')
 
-    def __new__(cls, type_, value, pos_in_stream=None, line=None, column=None):
-        self = super(Token, cls).__new__(cls, value)
+    def __new__(cls, type_, value, pos_in_stream=None, line=None, column=None, end_line=None, end_column=None):
+        try:
+            self = super(Token, cls).__new__(cls, value)
+        except UnicodeDecodeError:
+            value = value.decode('latin1')
+            self = super(Token, cls).__new__(cls, value)
+
         self.type = type_
         self.pos_in_stream = pos_in_stream
         self.value = value
         self.line = line
         self.column = column
-        self.end_line = None
-        self.end_column = None
+        self.end_line = end_line
+        self.end_column = end_column
         return self
 
     @classmethod
     def new_borrow_pos(cls, type_, value, borrow_t):
-        return cls(type_, value, borrow_t.pos_in_stream, line=borrow_t.line, column=borrow_t.column)
+        return cls(type_, value, borrow_t.pos_in_stream, borrow_t.line, borrow_t.column, borrow_t.end_line, borrow_t.end_column)
 
     def __reduce__(self):
         return (self.__class__, (self.type, self.value, self.pos_in_stream, self.line, self.column, ))
@@ -151,6 +156,8 @@ class _Lex:
                     t = Token(type_, value, line_ctr.char_pos, line_ctr.line, line_ctr.column)
                     if t.type in lexer.callback:
                         t = lexer.callback[t.type](t)
+                        if not isinstance(t, Token):
+                            raise ValueError("Callbacks must return a token (returned %r)" % t)
                     yield t
                 else:
                     if type_ in lexer.callback:
@@ -164,7 +171,8 @@ class _Lex:
 
                 break
             else:
-                raise UnexpectedCharacters(stream, line_ctr.char_pos, line_ctr.line, line_ctr.column, state=self.state)
+                allowed = [v for m, tfi in lexer.mres for v in tfi.values()]
+                raise UnexpectedCharacters(stream, line_ctr.char_pos, line_ctr.line, line_ctr.column, allowed=allowed, state=self.state)
 
 
 class UnlessCallback:
@@ -178,6 +186,17 @@ class UnlessCallback:
                 t.type = type_from_index[m.lastindex]
                 break
         return t
+
+class CallChain:
+    def __init__(self, callback1, callback2, cond):
+        self.callback1 = callback1
+        self.callback2 = callback2
+        self.cond = cond
+
+    def __call__(self, t):
+        t2 = self.callback1(t)
+        return self.callback2(t) if self.cond(t2) else t2
+
 
 ###}
 
@@ -274,8 +293,11 @@ class TraditionalLexer(Lexer):
         assert all(self.callback.values())
 
         for type_, f in user_callbacks.items():
-            assert type_ not in self.callback
-            self.callback[type_] = f
+            if type_ in self.callback:
+                # Already a callback there, probably UnlessCallback
+                self.callback[type_] = CallChain(self.callback[type_], f, lambda t: t.type == type_)
+            else:
+                self.callback[type_] = f
 
         self.terminals = terminals
 
