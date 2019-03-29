@@ -4,7 +4,7 @@ from functools import partial
 from .utils import get_regexp_width
 from .parsers.grammar_analysis import GrammarAnalyzer
 from .lexer import TraditionalLexer, ContextualLexer, Lexer, Token
-from .parsers import lalr_parser, earley, earley_forest, xearley, cyk
+from .parsers import lalr_parser, earley, xearley, cyk
 from .tree import Tree
 
 class WithLexer:
@@ -93,6 +93,8 @@ class XEarley:
     def _prepare_match(self, lexer_conf):
         self.regexps = {}
         for t in lexer_conf.tokens:
+            if t.priority != 1:
+                raise ValueError("Dynamic Earley doesn't support weights on terminals", t, t.priority)
             regexp = t.pattern.to_regexp()
             try:
                 width = get_regexp_width(regexp)[0]

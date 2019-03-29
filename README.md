@@ -4,11 +4,11 @@ Parse any context-free grammar, FAST and EASY!
 
 **Beginners**: Lark is not just another parser. It can parse any grammar you throw at it, no matter how complicated or ambiguous, and do so efficiently. It also constructs a parse-tree for you, without additional code on your part.
 
-**Experts**: Lark lets you choose between Earley and LALR(1), to trade-off power and speed. It also contains a CYK parser and unique features such as a contextual-lexer.
+**Experts**: Lark implements both Earley(SPPF) and LALR(1), and several different lexers, so you can trade-off power and speed, according to your requirements. It also provides a variety of sophisticated features and utilities.
 
 Lark can:
 
- - Parse all context-free grammars, and handle all ambiguity
+ - Parse all context-free grammars, and handle any ambiguity
  - Build a parse-tree automagically, no construction code required
  - Outperform all other Python libraries when using LALR(1) (Yes, including PLY)
  - Run on every Python interpreter (it's pure-python)
@@ -21,11 +21,10 @@ Most importantly, Lark will save you time and prevent you from getting parsing h
 ### Quick links
 
 - [Documentation @readthedocs](https://lark-parser.readthedocs.io/)
-- [Tutorial](/docs/json_tutorial.md) for writing a JSON parser.
 - [Cheatsheet (PDF)](/docs/lark_cheatsheet.pdf)
+- [Tutorial](/docs/json_tutorial.md) for writing a JSON parser.
 - Blog post: [How to write a DSL with Lark](http://blog.erezsh.com/how-to-write-a-dsl-in-python-with-lark/)
-- [Forum @googlegroups](https://groups.google.com/forum/#!forum/lark-parser)
-- [Gitter chat](https://gitter.im/lark-parser/Lobby) (New)
+- [Gitter chat](https://gitter.im/lark-parser/Lobby)
 
 ### Install Lark
 
@@ -114,6 +113,8 @@ Check out the [JSON tutorial](/docs/json_tutorial.md#conclusion) for more detail
 
 *Note: I really wanted to add PLY to the benchmark, but I couldn't find a working JSON parser anywhere written in PLY. If anyone can point me to one that actually works, I would be happy to add it!*
 
+*Note 2: The parsimonious code has been optimized for this specific test, unlike the other benchmarks (Lark included). Its "real-world" performance may not be as good.*
+
 #### Feature comparison
 
 | Library | Algorithm | Grammar | Builds tree? | Supports ambiguity? | Can handle every CFG? | Line/Column tracking | Generates Stand-alone
@@ -122,7 +123,6 @@ Check out the [JSON tutorial](/docs/json_tutorial.md#conclusion) for more detail
 | [PLY](http://www.dabeaz.com/ply/) | LALR(1) | BNF | No | No | No | No | No |
 | [PyParsing](http://pyparsing.wikispaces.com/) | PEG | Combinators | No | No | No\* | No | No |
 | [Parsley](https://pypi.python.org/pypi/Parsley) | PEG | EBNF | No | No | No\* | No | No |
-| [funcparserlib](https://github.com/vlasovskikh/funcparserlib) | Recursive-Descent | Combinators | No | No | No | No | No |
 | [Parsimonious](https://github.com/erikrose/parsimonious) | PEG | EBNF | Yes | No | No\* | No | No |
 | [ANTLR](https://github.com/antlr/antlr4) | LL(*) | EBNF | Yes | No | Yes? | Yes | No |
 
@@ -165,18 +165,7 @@ Lark uses the [MIT license](LICENSE).
 
 ## Contribute
 
-Lark is currently accepting pull-requests.
-
-There are many ways you can help the project:
-
-* Help solve issues
-* Improve the documentation
-* Write new grammars for Lark's library
-* Write a blog post introducing Lark to your audience
-* Port Lark to another language
-* Help me with code developemnt
-
-If you're interested in taking one of these on, let me know and I will provide more details and assist you in the process.
+Lark is currently accepting pull-requests. See [How to develop Lark](/docs/how_to_develop.md)
 
 ## Donate
 

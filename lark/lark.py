@@ -72,9 +72,9 @@ class LarkOptions(object):
 
         assert self.parser in ('earley', 'lalr', 'cyk', None)
 
-        if self.ambiguity == 'explicit' and self.transformer:
-            raise ValueError('Cannot specify an embedded transformer when using the Earley algorithm for explicit ambiguity.'
-                             'Please use your transformer on the resulting Forest, or use a different algorithm (i.e. LALR)')
+        if self.parser == 'earley' and self.transformer:
+            raise ValueError('Cannot specify an embedded transformer when using the Earley algorithm.'
+                             'Please use your transformer on the resulting parse tree, or use a different algorithm (i.e. LALR)')
 
         if o:
             raise ValueError("Unknown options: %s" % o.keys())
@@ -117,9 +117,6 @@ class Lark:
             self.source = grammar.name
         except AttributeError:
             self.source = '<string>'
-            cache_file = "larkcache_%s" % str(hash(grammar)%(2**32))
-        else:
-            cache_file = "larkcache_%s" % os.path.basename(self.source)
 
         # Drain file-like objects to get their contents
         try:
@@ -156,14 +153,16 @@ class Lark:
             disambig_parsers = ['earley', 'cyk']
             assert self.options.parser in disambig_parsers, (
                 'Only %s supports disambiguation right now') % ', '.join(disambig_parsers)
-        assert self.options.priority in ('auto', 'none', 'normal', 'invert'), 'invalid priority option specified: {}. options are auto, none, normal, invert.'.format(self.options.priority)
+
         if self.options.priority == 'auto':
             if self.options.parser in ('earley', 'cyk', ):
                 self.options.priority = 'normal'
             elif self.options.parser in ('lalr', ):
-                self.options.priority = 'none'
-        if self.options.priority in ('invert', 'normal'):
+                self.options.priority = None
+        elif self.options.priority in ('invert', 'normal'):
             assert self.options.parser in ('earley', 'cyk'), "priorities are not supported for LALR at this time"
+
+        assert self.options.priority in ('auto', None, 'normal', 'invert'), 'invalid priority option specified: {}. options are auto, none, normal, invert.'.format(self.options.priority)
         assert self.options.ambiguity not in ('resolve__antiscore_sum', ), 'resolve__antiscore_sum has been replaced with the option priority="invert"'
         assert self.options.ambiguity in ('resolve', 'explicit', 'auto', )
 
@@ -182,7 +181,7 @@ class Lark:
         # Else, if the user asked to disable priorities, strip them from the
         # rules. This allows the Earley parsers to skip an extra forest walk
         # for improved performance, if you don't need them (or didn't specify any).
-        elif self.options.priority == 'none':
+        elif self.options.priority == None:
             for rule in self.rules:
                 if rule.options and rule.options.priority is not None:
                     rule.options.priority = None
