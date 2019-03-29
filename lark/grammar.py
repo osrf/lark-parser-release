@@ -38,12 +38,17 @@ class Rule(object):
     """
         origin : a symbol
         expansion : a list of symbols
+        order : index of this expansion amongst all rules of the same name
     """
-    def __init__(self, origin, expansion, alias=None, options=None):
+    __slots__ = ('origin', 'expansion', 'alias', 'options', 'order', '_hash')
+    def __init__(self, origin, expansion, order=0, alias=None, options=None):
         self.origin = origin
         self.expansion = expansion
         self.alias = alias
+        self.order = order
         self.options = options
+        self._hash = hash((self.origin, tuple(self.expansion)))
+
 
     def __str__(self):
         return '<%s : %s>' % (self.origin.name, ' '.join(x.name for x in self.expansion))
@@ -51,12 +56,21 @@ class Rule(object):
     def __repr__(self):
         return 'Rule(%r, %r, %r, %r)' % (self.origin, self.expansion, self.alias, self.options)
 
+    def __hash__(self):
+        return self._hash
+
+    def __eq__(self, other):
+        if not isinstance(other, Rule):
+            return False
+        return self.origin == other.origin and self.expansion == other.expansion
+
 
 class RuleOptions:
     def __init__(self, keep_all_tokens=False, expand1=False, priority=None):
         self.keep_all_tokens = keep_all_tokens
         self.expand1 = expand1
         self.priority = priority
+        self.empty_indices = ()
 
     def __repr__(self):
         return 'RuleOptions(%r, %r, %r)' % (

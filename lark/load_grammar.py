@@ -3,7 +3,7 @@
 import os.path
 import sys
 from ast import literal_eval
-from copy import deepcopy
+from copy import copy, deepcopy
 
 from .utils import bfs
 from .lexer import Token, TerminalDef, PatternStr, PatternRE
@@ -12,7 +12,7 @@ from .parse_tree_builder import ParseTreeBuilder
 from .parser_frontends import LALR_TraditionalLexer
 from .common import LexerConf, ParserConf
 from .grammar import RuleOptions, Rule, Terminal, NonTerminal, Symbol
-from .utils import classify, suppress
+from .utils import classify, suppress, dedup_list
 from .exceptions import GrammarError, UnexpectedCharacters, UnexpectedToken
 
 from .tree import Tree, SlottedTree as ST
@@ -25,6 +25,8 @@ IMPORT_PATHS = [os.path.join(__path__, 'grammars')]
 EXT = '.lark'
 
 _RE_FLAGS = 'imslux'
+
+_EMPTY = Symbol('__empty__')
 
 _TERMINAL_NAMES = {
     '.' : 'DOT',
@@ -137,7 +139,7 @@ RULES = {
     'declare': ['_DECLARE _declare_args _NL'],
     'import': ['_IMPORT _import_path _NL',
                '_IMPORT _import_path _LPAR name_list _RPAR _NL',
-               '_IMPORT _import_path _TO TERMINAL _NL'],
+               '_IMPORT _import_path _TO name _NL'],
 
     '_import_path': ['import_lib', 'import_rel'],
     'import_lib': ['_import_args'],
@@ -150,7 +152,6 @@ RULES = {
     '_declare_args': ['name', '_declare_args name'],
     'literal': ['REGEXP', 'STRING'],
 }
-
 
 @inline_args
 class EBNF_to_BNF(Transformer_InPlace):
@@ -175,7 +176,8 @@ class EBNF_to_BNF(Transformer_InPlace):
 
     def expr(self, rule, op, *args):
         if op.value == '?':
-            return ST('expansions', [rule, ST('expansion', [])])
+            empty = ST('expansion', [])
+            return ST('expansions', [rule, empty])
         elif op.value == '+':
             # a : b c+ d
             #   -->
@@ -198,6 +200,23 @@ class EBNF_to_BNF(Transformer_InPlace):
                     raise GrammarError("Bad Range for %s (%d..%d isn't allowed)" % (rule, mn, mx))
             return ST('expansions', [ST('expansion', [rule] * n) for n in range(mn, mx+1)])
         assert False, op
+
+    def maybe(self, rule):
+        keep_all_tokens = self.rule_options and self.rule_options.keep_all_tokens
+
+        def will_not_get_removed(sym):
+            if isinstance(sym, NonTerminal): 
+                return not sym.name.startswith('_')
+            if isinstance(sym, Terminal):
+                return keep_all_tokens or not sym.filter_out
+            assert False
+
+        if any(rule.scan_values(will_not_get_removed)):
+            empty = _EMPTY
+        else:
+            empty = ST('expansion', [])
+
+        return ST('expansions', [rule, empty])
 
 
 class SimplifyRule_Visitor(Visitor):
@@ -229,7 +248,7 @@ class SimplifyRule_Visitor(Visitor):
                 tree.data = 'expansions'
                 tree.children = [self.visit(ST('expansion', [option if i==j else other
                                                             for j, other in enumerate(tree.children)]))
-                                    for option in set(child.children)]
+                                    for option in dedup_list(child.children)]
                 self._flatten(tree)
                 break
 
@@ -244,7 +263,7 @@ class SimplifyRule_Visitor(Visitor):
 
     def expansions(self, tree):
         self._flatten(tree)
-        tree.children = list(set(tree.children))
+        tree.children = dedup_list(tree.children)
 
 
 class RuleTreeToText(Transformer):
@@ -260,9 +279,6 @@ class RuleTreeToText(Transformer):
 
 @inline_args
 class CanonizeTree(Transformer_InPlace):
-    def maybe(self, expr):
-        return ST('expr', [expr, Token('OP', '?', -1)])
-
     def tokenmods(self, *args):
         if len(args) == 1:
             return list(args)
@@ -338,7 +354,7 @@ def _fix_escaping(s):
             n2 = next(i)
             if n2 == '\\':
                 w += '\\\\'
-            elif n2 not in 'unftr':
+            elif n2 not in 'uxnftr':
                 w += '\\'
             w += n2
     w = w.replace('\\"', '"').replace("'", "\\'")
@@ -381,7 +397,7 @@ class PrepareLiterals(Transformer_InPlace):
         assert start.type == end.type == 'STRING'
         start = start.value[1:-1]
         end = end.value[1:-1]
-        assert len(start) == len(end) == 1, (start, end, len(start), len(end))
+        assert len(_fix_escaping(start)) == len(_fix_escaping(end)) == 1, (start, end, len(_fix_escaping(start)), len(_fix_escaping(end)))
         regexp = '[%s-%s]' % (start, end)
         return ST('pattern', [PatternRE(regexp)])
 
@@ -419,6 +435,9 @@ class TerminalTreeToPattern(Transformer):
         else:
             assert len(args) == 2
         return PatternRE('(?:%s)%s' % (inner.to_regexp(), op), inner.flags)
+
+    def maybe(self, expr):
+        return self.expr(expr + ['?'])
 
     def alias(self, t):
         raise GrammarError("Aliasing not allowed in terminals (You used -> in the wrong place)")
@@ -481,7 +500,8 @@ class Grammar:
         for name, rule_tree, options in rule_defs:
             ebnf_to_bnf.rule_options = RuleOptions(keep_all_tokens=True) if options and options.keep_all_tokens else None
             tree = transformer.transform(rule_tree)
-            rules.append((name, ebnf_to_bnf.transform(tree), options))
+            res = ebnf_to_bnf.transform(tree)
+            rules.append((name, res, options))
         rules += ebnf_to_bnf.new_rules
 
         assert len(rules) == len({name for name, _t, _o in rules}), "Whoops, name collision"
@@ -491,7 +511,8 @@ class Grammar:
 
         simplify_rule = SimplifyRule_Visitor()
         compiled_rules = []
-        for name, tree, options in rules:
+        for i, rule_content in enumerate(rules):
+            name, tree, options = rule_content
             simplify_rule.visit(tree)
             expansions = rule_tree_to_text.transform(tree)
 
@@ -499,10 +520,37 @@ class Grammar:
                 if alias and name.startswith('_'):
                     raise GrammarError("Rule %s is marked for expansion (it starts with an underscore) and isn't allowed to have aliases (alias=%s)" % (name, alias))
 
-                assert all(isinstance(x, Symbol) for x in expansion), expansion
+                empty_indices = [x==_EMPTY for i, x in enumerate(expansion)]
+                if any(empty_indices):
+                    exp_options = copy(options) if options else RuleOptions()
+                    exp_options.empty_indices = empty_indices
+                    expansion = [x for x in expansion if x!=_EMPTY]
+                else:
+                    exp_options = options
 
-                rule = Rule(NonTerminal(name), expansion, alias, options)
+                assert all(isinstance(x, Symbol) for x in expansion), expansion
+                rule = Rule(NonTerminal(name), expansion, i, alias, exp_options)
                 compiled_rules.append(rule)
+
+        # Remove duplicates of empty rules, throw error for non-empty duplicates
+        if len(set(compiled_rules)) != len(compiled_rules):
+            duplicates = classify(compiled_rules, lambda x: x)
+            for dups in duplicates.values():
+                if len(dups) > 1:
+                    if dups[0].expansion:
+                        raise GrammarError("Rules defined twice: %s" % ', '.join(str(i) for i in duplicates))
+
+                    # Empty rule; assert all other attributes are equal
+                    assert len({(r.alias, r.order, r.options) for r in dups}) == len(dups)
+
+            # Remove duplicates
+            compiled_rules = list(set(compiled_rules))
+
+        # Filter out unused terminals
+        used_terms = {t.name for r in compiled_rules
+                             for t in r.expansion
+                             if isinstance(t, Terminal)}
+        terminals = [t for t in terminals if t.name in used_terms or t.name in self.ignore]
 
         return terminals, compiled_rules, self.ignore
 
@@ -526,23 +574,30 @@ def import_grammar(grammar_path, base_paths=[]):
     return _imported_grammars[grammar_path]
 
 def import_from_grammar_into_namespace(grammar, namespace, aliases):
+    """Returns all rules and terminals of grammar, prepended
+    with a 'namespace' prefix, except for those which are aliased.
+    """
+
     imported_terms = dict(grammar.term_defs)
-    imported_rules = {n:(n,t,o) for n,t,o in grammar.rule_defs}
-    
+    imported_rules = {n:(n,deepcopy(t),o) for n,t,o in grammar.rule_defs}
+
     term_defs = []
     rule_defs = []
 
     def rule_dependencies(symbol):
         if symbol.type != 'RULE':
             return []
-        _, tree, _ = imported_rules[symbol]
+        try:
+            _, tree, _ = imported_rules[symbol]
+        except KeyError:
+            raise GrammarError("Missing symbol '%s' in grammar %s" % (symbol, namespace))
         return tree.scan_values(lambda x: x.type in ('RULE', 'TERMINAL'))
 
     def get_namespace_name(name):
         try:
             return aliases[name].value
         except KeyError:
-            return '%s.%s' % (namespace, name)
+            return '%s__%s' % (namespace, name)
 
     to_import = list(bfs(aliases, rule_dependencies))
     for symbol in to_import:
@@ -616,7 +671,7 @@ class GrammarLoader:
         terminals = [TerminalDef(name, PatternRE(value)) for name, value in TERMINALS.items()]
 
         rules = [options_from_rule(name, x) for name, x in  RULES.items()]
-        rules = [Rule(NonTerminal(r), symbols_from_strcase(x.split()), None, o) for r, xs, o in rules for x in xs]
+        rules = [Rule(NonTerminal(r), symbols_from_strcase(x.split()), i, None, o) for r, xs, o in rules for i, x in enumerate(xs)]
         callback = ParseTreeBuilder(rules, ST).create_callback()
         lexer_conf = LexerConf(terminals, ['WS', 'COMMENT'])
 
@@ -694,14 +749,20 @@ class GrammarLoader:
                     g = import_grammar(grammar_path)
                 else:  # Relative import
                     if grammar_name == '<string>':  # Import relative to script file path if grammar is coded in script
-                        base_file = os.path.abspath(sys.modules['__main__'].__file__)
+                        try:
+                            base_file = os.path.abspath(sys.modules['__main__'].__file__)
+                        except AttributeError:
+                            base_file = None
                     else:
                         base_file = grammar_name  # Import relative to grammar file path if external grammar file
-                    base_path = os.path.split(base_file)[0]
+                    if base_file:
+                        base_path = os.path.split(base_file)[0]
+                    else:
+                        base_path = os.path.abspath(os.path.curdir)
                     g = import_grammar(grammar_path, base_paths=[base_path])
 
                 aliases_dict = dict(zip(names, aliases))
-                new_td, new_rd = import_from_grammar_into_namespace(g, '.'.join(dotted_path), aliases_dict)
+                new_td, new_rd = import_from_grammar_into_namespace(g, '__'.join(dotted_path), aliases_dict)
 
                 term_defs += new_td
                 rule_defs += new_rd
@@ -735,7 +796,7 @@ class GrammarLoader:
 
             name = '__IGNORE_%d'% len(ignore_names)
             ignore_names.append(name)
-            term_defs.append((name, (t, 0)))
+            term_defs.append((name, (t, 1)))
 
         # Verify correctness 2
         terminal_names = set()
@@ -769,8 +830,6 @@ class GrammarLoader:
                 else:
                     if sym not in rule_names:
                         raise GrammarError("Rule '%s' used but not defined (in rule %s)" % (sym, name))
-
-        # TODO don't include unused terminals, they can only cause trouble!
 
         return Grammar(rules, term_defs, ignore_names)
 

@@ -4,7 +4,7 @@ from functools import partial
 from .utils import get_regexp_width
 from .parsers.grammar_analysis import GrammarAnalyzer
 from .lexer import TraditionalLexer, ContextualLexer, Lexer, Token
-from .parsers import lalr_parser, earley, earley_forest, xearley, cyk
+from .parsers import lalr_parser, earley, xearley, cyk
 from .tree import Tree
 
 class WithLexer:
@@ -54,16 +54,6 @@ class LALR_CustomLexer(WithLexer):
         self.lexer_conf = lexer_conf
         self.lexer = lexer_cls(lexer_conf)
 
-
-def get_ambiguity_options(options):
-    if not options or options.ambiguity == 'resolve':
-        return {}
-    elif options.ambiguity == 'resolve__antiscore_sum':
-        return {'forest_sum_visitor': earley_forest.ForestAntiscoreSumVisitor}
-    elif options.ambiguity == 'explicit':
-        return {'resolve_ambiguity': False}
-    raise ValueError(options)
-
 def tokenize_text(text):
     line = 1
     col_start_pos = 0
@@ -77,7 +67,8 @@ class Earley(WithLexer):
     def __init__(self, lexer_conf, parser_conf, options=None):
         self.init_traditional_lexer(lexer_conf)
 
-        self.parser = earley.Parser(parser_conf, self.match, **get_ambiguity_options(options))
+        resolve_ambiguity = options.ambiguity == 'resolve'
+        self.parser = earley.Parser(parser_conf, self.match, resolve_ambiguity=resolve_ambiguity)
 
     def match(self, term, token):
         return term.name == token.type
@@ -88,11 +79,11 @@ class XEarley:
         self.token_by_name = {t.name:t for t in lexer_conf.tokens}
 
         self._prepare_match(lexer_conf)
-
-        kw.update(get_ambiguity_options(options))
+        resolve_ambiguity = options.ambiguity == 'resolve'
         self.parser = xearley.Parser(parser_conf,
                                     self.match,
                                     ignore=lexer_conf.ignore,
+                                    resolve_ambiguity=resolve_ambiguity,
                                     **kw
                                     )
 
@@ -102,6 +93,8 @@ class XEarley:
     def _prepare_match(self, lexer_conf):
         self.regexps = {}
         for t in lexer_conf.tokens:
+            if t.priority != 1:
+                raise ValueError("Dynamic Earley doesn't support weights on terminals", t, t.priority)
             regexp = t.pattern.to_regexp()
             try:
                 width = get_regexp_width(regexp)[0]
@@ -118,7 +111,7 @@ class XEarley:
 
 class XEarley_CompleteLex(XEarley):
     def __init__(self, *args, **kw):
-        super(self).__init__(*args, complete_lex=True, **kw)
+        XEarley.__init__(self, *args, complete_lex=True, **kw)
 
 
 

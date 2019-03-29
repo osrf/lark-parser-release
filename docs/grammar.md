@@ -22,7 +22,7 @@ Lark grammars are composed of a list of definitions and directives, each on its 
 
 Lark begins the parse with the rule 'start', unless specified otherwise in the options.
 
-Names of rules are always in lowercase, while names of terminals are always in uppercase. This distinction has practical effects for tree construction, and for building a lexer (aka tokenizer, or scanner).
+Names of rules are always in lowercase, while names of terminals are always in uppercase. This distinction has practical effects, for the shape of the generated parse-tree, and the automatic construction of the lexer (aka tokenizer, or scanner).
 
 
 ## Terminals
@@ -43,7 +43,7 @@ Literals can be one of:
 * `/regular expression+/`
 * `"case-insensitive string"i`
 * `/re with flags/imulx`
-* Literal range: `"a".."z"`, `"1..9"`, etc.
+* Literal range: `"a".."z"`, `"1".."9"`, etc.
 
 #### Notes for when using a lexer:
 
@@ -85,7 +85,7 @@ Each item is one of:
 * `TERMINAL`
 * `"string literal"` or `/regexp literal/`
 * `(item item ..)` - Group items
-* `[item item ..]` - Maybe. Same as: `(item item ..)?`
+* `[item item ..]` - Maybe. Same as `(item item ..)?`
 * `item?` - Zero or one instances of item ("maybe")
 * `item*` - Zero or more instances of item
 * `item+` - One or more instances of item
@@ -109,6 +109,10 @@ four_words: word ~ 4
 
 All occurrences of the terminal will be ignored, and won't be part of the parse.
 
+Using the `%ignore` directive results in a cleaner grammar.
+
+It's especially important for the LALR(1) algorithm, because adding whitespace (or comments, or other extranous elements) explicitly in the grammar, harms its predictive abilities, which are based on a lookahead of 1.
+
 **Syntax:**
 ```html
 %ignore <TERMINAL>
@@ -122,26 +126,35 @@ COMMENT: "#" /[^\n]/*
 ```
 ### %import
 
-Allows to import terminals from lark grammars.
+Allows to import terminals and rules from lark grammars.
 
-Future versions will allow to import rules and macros.
+When importing rules, all their dependencies will be imported into a namespace, to avoid collisions. It's not possible to override their dependencies (e.g. like you would when inheriting a class).
 
 **Syntax:**
 ```html
 %import <module>.<TERMINAL>
-%import <module> (<TERM1> <TERM2>)
+%import <module>.<rule>
+%import <module>.<TERMINAL> -> <NEWTERMINAL>
+%import <module>.<rule> -> <newrule>
+%import <module> (<TERM1> <TERM2> <rule1> <rule2>)
 ```
 
 If the module path is absolute, Lark will attempt to load it from the built-in directory (currently, only `common.lark` is available).
 
 If the module path is relative, such as `.path.to.file`, Lark will attempt to load it from the current working directory. Grammars must have the `.lark` extension.
 
+The rule or terminal can be imported under an other name with the `->` syntax.
+
 **Example:**
 ```perl
 %import common.NUMBER
 
 %import .terminals_file (A B C)
+
+%import .rules_file.rulea -> ruleb
 ```
+
+Note that `%ignore` directives cannot be imported. Imported rules will abide by the `%ignore` directives declared in the main grammar.
 
 ### %declare
 

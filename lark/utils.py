@@ -57,12 +57,16 @@ from functools import wraps, partial
 from contextlib import contextmanager
 
 Str = type(u'')
+try:
+    classtype = types.ClassType # Python2
+except AttributeError:
+    classtype = type    # Python3
 
 def smart_decorator(f, create_decorator):
     if isinstance(f, types.FunctionType):
         return wraps(f)(create_decorator(f, True))
 
-    elif isinstance(f, (type, types.BuiltinFunctionType)):
+    elif isinstance(f, (classtype, type, types.BuiltinFunctionType)):
         return wraps(f)(create_decorator(f, False))
 
     elif isinstance(f, types.MethodType):
@@ -75,6 +79,12 @@ def smart_decorator(f, create_decorator):
     else:
         return create_decorator(f.__func__.__call__, True)
 
+def dedup_list(l):
+    """Given a list (l) will removing duplicates from the list,
+       preserving the original order of the list. Assumes that
+       the list entrie are hashable."""
+    dedup = set()
+    return [ x for x in l if not (x in dedup or dedup.add(x))]
 
 ###}
 

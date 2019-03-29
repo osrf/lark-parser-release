@@ -45,9 +45,7 @@ from collections import defaultdict
 
 import lark
 from lark import Lark
-from lark.parsers.lalr_analysis import Shift, Reduce
-
-from ..grammar import Rule
+from lark.parsers.lalr_analysis import Reduce
 
 _dir = path.dirname(__file__)
 _larkdir = path.join(_dir, path.pardir)
@@ -208,7 +206,7 @@ class TreeBuilderAtoms:
         print('RULES = {')
         for i, r in enumerate(self.rules):
             rule_ids[r] = i
-            print('  %d: Rule(%r, [%s], %r, %r),' % (i, r.origin, ', '.join(s.fullrepr for s in r.expansion), self.ptb.user_aliases[r], r.options ))
+            print('  %d: Rule(%r, [%s], alias=%r, options=%r),' % (i, r.origin, ', '.join(s.fullrepr for s in r.expansion), self.ptb.user_aliases[r], r.options ))
         print('}')
         print('parse_tree_builder = ParseTreeBuilder(RULES.values(), Tree)')
 

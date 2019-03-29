@@ -6,7 +6,7 @@ import copy
 import pickle
 
 from lark.tree import Tree
-from lark.visitors import Transformer, Interpreter, visit_children_decor, v_args
+from lark.visitors import Transformer, Interpreter, visit_children_decor, v_args, Discard
 
 
 class TestTrees(TestCase):
@@ -21,6 +21,17 @@ class TestTrees(TestCase):
         data = pickle.dumps(s)
         assert pickle.loads(data) == s
 
+    def test_iter_subtrees(self):
+        expected = [Tree('b', 'x'), Tree('c', 'y'), Tree('d', 'z'),
+                    Tree('a', [Tree('b', 'x'), Tree('c', 'y'), Tree('d', 'z')])]
+        nodes = list(self.tree1.iter_subtrees())
+        self.assertEqual(nodes, expected)
+
+    def test_iter_subtrees_topdown(self):
+        expected = [Tree('a', [Tree('b', 'x'), Tree('c', 'y'), Tree('d', 'z')]),
+                    Tree('b', 'x'), Tree('c', 'y'), Tree('d', 'z')]
+        nodes = list(self.tree1.iter_subtrees_topdown())
+        self.assertEqual(nodes, expected)
 
     def test_interp(self):
         t = Tree('a', [Tree('b', []), Tree('c', []), 'd'])
@@ -116,6 +127,44 @@ class TestTrees(TestCase):
         self.assertEqual(x, 2)
         x = MyTransformer().transform( Tree('hello', [2]))
         self.assertEqual(x, 'hello')
+
+    def test_vargs_override(self):
+        t = Tree('add', [Tree('sub', [Tree('i', ['3']), Tree('f', ['1.1'])]), Tree('i', ['1'])])
+
+        @v_args(inline=True)
+        class T(Transformer):
+            i = int
+            f = float
+            sub = lambda self, a, b: a-b
+
+            not_a_method = {'other': 'stuff'}
+
+            @v_args(inline=False)
+            def add(self, values):
+                return sum(values)
+
+        res = T().transform(t)
+        self.assertEqual(res, 2.9)
+
+    def test_discard(self):
+        class MyTransformer(Transformer):
+            def a(self, args):
+                return 1 # some code here
+
+            def b(cls, args):
+                raise Discard()
+
+        t = Tree('root', [
+            Tree('b', []),
+            Tree('a', []),
+            Tree('b', []),
+            Tree('c', []),
+            Tree('b', []),
+        ])
+        t2 = Tree('root', [1, Tree('c', [])])
+
+        x = MyTransformer().transform( t )
+        self.assertEqual(x, t2)
 
 
 if __name__ == '__main__':
