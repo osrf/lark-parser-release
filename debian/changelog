@@ -1,3 +1,9 @@
+lark-parser (0.7.0-1) stretch; urgency=medium
+
+  * New upstream version 0.7.0
+
+ -- Jose Luis Rivero <jrivero@osrfoundation.org>  Tue, 30 Jul 2019 11:33:22 +0100
+
 lark-parser (0.7.0-1) xenial; urgency=medium
 
   * New upstream version 0.7.0
