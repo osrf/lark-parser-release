@@ -69,10 +69,13 @@ class MakeMatchTree:
 class Reconstructor:
     def __init__(self, parser):
         # XXX TODO calling compile twice returns different results!
-        tokens, rules, _grammar_extra = parser.grammar.compile()
+        tokens, rules, _grammar_extra = parser.grammar.compile(parser.options.start)
 
         self.write_tokens = WriteTokensTransformer({t.name:t for t in tokens})
         self.rules = list(self._build_recons_rules(rules))
+        callbacks = {rule: rule.alias for rule in self.rules}   # TODO pass callbacks through dict, instead of alias?
+        self.parser = earley.Parser(ParserConf(self.rules, callbacks, parser.options.start),
+                                    self._match, resolve_ambiguity=True)
 
     def _build_recons_rules(self, rules):
         expand1s = {r.origin for r in rules if r.options and r.options.expand1}
@@ -112,8 +115,7 @@ class Reconstructor:
 
     def _reconstruct(self, tree):
         # TODO: ambiguity?
-        parser = earley.Parser(ParserConf(self.rules, None, tree.data), self._match, resolve_ambiguity=True)
-        unreduced_tree = parser.parse(tree.children)   # find a full derivation
+        unreduced_tree = self.parser.parse(tree.children, tree.data)   # find a full derivation
         assert unreduced_tree.data == tree.data
         res = self.write_tokens.transform(unreduced_tree)
         for item in res:

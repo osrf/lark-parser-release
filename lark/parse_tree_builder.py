@@ -2,6 +2,7 @@ from .exceptions import GrammarError
 from .lexer import Token
 from .tree import Tree
 from .visitors import InlineTransformer # XXX Deprecated
+from .visitors import Transformer_InPlace
 
 ###{standalone
 from functools import partial, wraps
@@ -187,14 +188,18 @@ def maybe_create_ambiguous_expander(tree_class, expansion, keep_all_tokens):
     if to_expand:
         return partial(AmbiguousExpander, to_expand, tree_class)
 
-class Callback(object):
-    pass
-
-
 def ptb_inline_args(func):
     @wraps(func)
     def f(children):
         return func(*children)
+    return f
+
+def inplace_transformer(func):
+    @wraps(func)
+    def f(children):
+        # function name in a Transformer is a rule name.
+        tree = Tree(func.__name__, children)
+        return func(tree)
     return f
 
 class ParseTreeBuilder:
@@ -207,31 +212,26 @@ class ParseTreeBuilder:
 
         self.rule_builders = list(self._init_builders(rules))
 
-        self.user_aliases = {}
-
     def _init_builders(self, rules):
         for rule in rules:
             options = rule.options
             keep_all_tokens = self.always_keep_all_tokens or (options.keep_all_tokens if options else False)
             expand_single_child = options.expand1 if options else False
 
-            wrapper_chain = filter(None, [
+            wrapper_chain = list(filter(None, [
                 (expand_single_child and not rule.alias) and ExpandSingleChild,
                 maybe_create_child_filter(rule.expansion, keep_all_tokens, self.ambiguous, options.empty_indices if self.maybe_placeholders and options else None),
                 self.propagate_positions and PropagatePositions,
                 self.ambiguous and maybe_create_ambiguous_expander(self.tree_class, rule.expansion, keep_all_tokens),
-            ])
+            ]))
 
             yield rule, wrapper_chain
 
 
     def create_callback(self, transformer=None):
-        callback = Callback()
+        callbacks = {}
 
-        i = 0
         for rule, wrapper_chain in self.rule_builders:
-            internal_callback_name = '_cb%d_%s' % (i, rule.origin)
-            i += 1
 
             user_callback_name = rule.alias or rule.origin.name
             try:
@@ -240,19 +240,19 @@ class ParseTreeBuilder:
                 # XXX InlineTransformer is deprecated!
                 if getattr(f, 'inline', False) or isinstance(transformer, InlineTransformer):
                     f = ptb_inline_args(f)
+                elif hasattr(f, 'whole_tree') or isinstance(transformer, Transformer_InPlace):
+                    f = inplace_transformer(f)
             except AttributeError:
                 f = partial(self.tree_class, user_callback_name)
-
-            self.user_aliases[rule] = rule.alias
-            rule.alias = internal_callback_name
 
             for w in wrapper_chain:
                 f = w(f)
 
-            if hasattr(callback, internal_callback_name):
+            if rule in callbacks:
                 raise GrammarError("Rule '%s' already exists" % (rule,))
-            setattr(callback, internal_callback_name, f)
 
-        return callback
+            callbacks[rule] = f
+
+        return callbacks
 
 ###}

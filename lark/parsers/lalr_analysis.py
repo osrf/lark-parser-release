@@ -9,10 +9,13 @@ For now, shift/reduce conflicts are automatically resolved as shifts.
 import logging
 from collections import defaultdict
 
-from ..utils import classify, classify_bool, bfs, fzset
+from ..utils import classify, classify_bool, bfs, fzset, Serialize, Enumerator
 from ..exceptions import GrammarError
 
 from .grammar_analysis import GrammarAnalyzer, Terminal
+from ..grammar import Rule
+
+###{standalone
 
 class Action:
     def __init__(self, name):
@@ -26,10 +29,38 @@ Shift = Action('Shift')
 Reduce = Action('Reduce')
 
 class ParseTable:
-    def __init__(self, states, start_state, end_state):
+    def __init__(self, states, start_states, end_states):
         self.states = states
-        self.start_state = start_state
-        self.end_state = end_state
+        self.start_states = start_states
+        self.end_states = end_states
+
+    def serialize(self, memo):
+        tokens = Enumerator()
+        rules = Enumerator()
+
+        states = {
+            state: {tokens.get(token): ((1, arg.serialize(memo)) if action is Reduce else (0, arg))
+                    for token, (action, arg) in actions.items()}
+            for state, actions in self.states.items()
+        }
+
+        return {
+            'tokens': tokens.reversed(),
+            'states': states,
+            'start_states': self.start_states,
+            'end_states': self.end_states,
+        }
+
+    @classmethod
+    def deserialize(cls, data, memo):
+        tokens = data['tokens']
+        states = {
+            state: {tokens[token]: ((Reduce, Rule.deserialize(arg, memo)) if action==1 else (Shift, arg))
+                    for token, (action, arg) in actions.items()}
+            for state, actions in data['states'].items()
+        }
+        return cls(states, data['start_states'], data['end_states'])
+
 
 class IntParseTable(ParseTable):
 
@@ -45,17 +76,15 @@ class IntParseTable(ParseTable):
             int_states[ state_to_idx[s] ] = la
 
 
-        start_state = state_to_idx[parse_table.start_state]
-        end_state = state_to_idx[parse_table.end_state]
-        return cls(int_states, start_state, end_state)
+        start_states = {start:state_to_idx[s] for start, s in parse_table.start_states.items()}
+        end_states = {start:state_to_idx[s] for start, s in parse_table.end_states.items()}
+        return cls(int_states, start_states, end_states)
 
-
-
+###}
 
 class LALR_Analyzer(GrammarAnalyzer):
 
     def compute_lookahead(self):
-        self.end_states = []
 
         self.states = {}
         def step(state):
@@ -75,16 +104,14 @@ class LALR_Analyzer(GrammarAnalyzer):
 
                 new_state = fzset(rps)
                 lookahead[sym].append((Shift, new_state))
-                if sym == Terminal('$END'):
-                    self.end_states.append( new_state )
                 yield new_state
 
             for k, v in lookahead.items():
                 if len(v) > 1:
                     if self.debug:
-                        logging.warn("Shift/reduce conflict for terminal %s:  (resolving as shift)", k.name)
+                        logging.warning("Shift/reduce conflict for terminal %s:  (resolving as shift)", k.name)
                         for act, arg in v:
-                            logging.warn(' * %s: %s', act, arg)
+                            logging.warning(' * %s: %s', act, arg)
                     for x in v:
                         # XXX resolving shift/reduce into shift, like PLY
                         # Give a proper warning
@@ -97,12 +124,10 @@ class LALR_Analyzer(GrammarAnalyzer):
 
             self.states[state] = {k.name:v[0] for k, v in lookahead.items()}
 
-        for _ in bfs([self.start_state], step):
+        for _ in bfs(self.start_states.values(), step):
             pass
 
-        self.end_state ,= self.end_states
-
-        self._parse_table = ParseTable(self.states, self.start_state, self.end_state)
+        self._parse_table = ParseTable(self.states, self.start_states, self.end_states)
 
         if self.debug:
             self.parse_table = self._parse_table

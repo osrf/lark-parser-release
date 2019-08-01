@@ -36,7 +36,7 @@ class Transformer:
                     return f(*children)
                 elif getattr(f, 'whole_tree', False):
                     if new_children is not None:
-                        raise NotImplementedError("Doesn't work with the base Transformer class")
+                        tree.children = new_children
                     return f(tree)
                 else:
                     return f(children)
@@ -72,7 +72,9 @@ class Transformer:
         assert mro[0] is cls
         libmembers = {name for _cls in mro[1:] for name, _ in getmembers(_cls)}
         for name, value in getmembers(cls):
-            if name.startswith('_') or name in libmembers:
+
+            # Make sure the function isn't inherited (unless it's overwritten)
+            if name.startswith('_') or (name in libmembers and name not in cls.__dict__):
                 continue
             if not callable(cls.__dict__[name]):
                 continue
