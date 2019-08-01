@@ -20,7 +20,9 @@ logging.basicConfig(level=logging.INFO)
 from lark.lark import Lark
 from lark.exceptions import GrammarError, ParseError, UnexpectedToken, UnexpectedInput, UnexpectedCharacters
 from lark.tree import Tree
-from lark.visitors import Transformer
+from lark.visitors import Transformer, Transformer_InPlace, v_args
+from lark.grammar import Rule
+from lark.lexer import TerminalDef
 
 __path__ = os.path.dirname(__file__)
 def _read(n, *args):
@@ -148,6 +150,51 @@ class TestParsers(unittest.TestCase):
         r = g.parse("xx")
         self.assertEqual( r.children, ["<c>"] )
 
+    def test_embedded_transformer_inplace(self):
+        @v_args(tree=True)
+        class T1(Transformer_InPlace):
+            def a(self, tree):
+                assert isinstance(tree, Tree), tree
+                tree.children.append("tested")
+                return tree
+
+            def b(self, tree):
+                return Tree(tree.data, tree.children + ['tested2'])
+
+        @v_args(tree=True)
+        class T2(Transformer):
+            def a(self, tree):
+                assert isinstance(tree, Tree)
+                tree.children.append("tested")
+                return tree
+
+            def b(self, tree):
+                return Tree(tree.data, tree.children + ['tested2'])
+
+        class T3(Transformer):
+            @v_args(tree=True)
+            def a(self, tree):
+                assert isinstance(tree, Tree)
+                tree.children.append("tested")
+                return tree
+
+            @v_args(tree=True)
+            def b(self, tree):
+                return Tree(tree.data, tree.children + ['tested2'])
+
+        for t in [T1(), T2(), T3()]:
+            for internal in [False, True]:
+                g = Lark("""start: a b
+                            a : "x"
+                            b : "y"
+                        """, parser='lalr', transformer=t if internal else None)
+                r = g.parse("xy")
+                if not internal:
+                    r = t.transform(r)
+
+                a, b = r.children
+                self.assertEqual(a.children, ["tested"])
+                self.assertEqual(b.children, ["tested2"])
 
     def test_alias(self):
         Lark("""start: ["a"] "b" ["c"] "e" ["f"] ["g"] ["h"] "x" -> d """)
@@ -982,6 +1029,32 @@ def _make_parser_test(LEXER, PARSER):
             self.assertEqual(res.children, ['ab'])
 
 
+            grammar = """
+            start: A B | AB
+            A: "a"
+            B.-20: "b"
+            AB.-10: "ab"
+            """
+            l = _Lark(grammar)
+            res = l.parse("ab")
+            self.assertEqual(res.children, ['a', 'b'])
+
+
+            grammar = """
+            start: A B | AB
+            A.-99999999999999999999999: "a"
+            B: "b"
+            AB: "ab"
+            """
+            l = _Lark(grammar)
+            res = l.parse("ab")
+
+            self.assertEqual(res.children, ['ab'])
+
+
+
+
+
 
         def test_import(self):
             grammar = """
@@ -1098,6 +1171,23 @@ def _make_parser_test(LEXER, PARSER):
             l = _Lark_open("test_relative_multi_import.lark", rel_to=__file__)
             x = l.parse('12 capybaras')
             self.assertEqual(x.children, ['12', 'capybaras'])
+
+        def test_relative_import_preserves_leading_underscore(self):
+            l = _Lark_open("test_relative_import_preserves_leading_underscore.lark", rel_to=__file__)
+            x = l.parse('Ax')
+            self.assertEqual(next(x.find_data('c')).children, ['A'])
+
+        def test_relative_import_of_nested_grammar(self):
+            l = _Lark_open("grammars/test_relative_import_of_nested_grammar.lark", rel_to=__file__)
+            x = l.parse('N')
+            self.assertEqual(next(x.find_data('rule_to_import')).children, ['N'])
+
+        def test_relative_import_rules_dependencies_imported_only_once(self):
+            l = _Lark_open("test_relative_import_rules_dependencies_imported_only_once.lark", rel_to=__file__)
+            x = l.parse('AAA')
+            self.assertEqual(next(x.find_data('a')).children, ['A'])
+            self.assertEqual(next(x.find_data('b')).children, ['A'])
+            self.assertEqual(next(x.find_data('d')).children, ['A'])
 
         def test_import_errors(self):
             grammar = """
@@ -1428,6 +1518,46 @@ def _make_parser_test(LEXER, PARSER):
             parser.parse(r'"\\" "b" "c"')
 
             parser.parse(r'"That" "And a \"b"')
+
+
+        def test_meddling_unused(self):
+            "Unless 'unused' is removed, LALR analysis will fail on reduce-reduce collision"
+
+            grammar = """
+                start: EKS* x
+                x: EKS
+                unused: x*
+                EKS: "x"
+            """
+            parser = _Lark(grammar)
+
+
+        @unittest.skipIf(PARSER!='lalr', "Serialize currently only works for LALR parsers (though it should be easy to extend)")
+        def test_serialize(self):
+            grammar = """
+                start: _ANY b "C"
+                _ANY: /./
+                b: "B"
+            """
+            parser = _Lark(grammar)
+            d = parser.serialize()
+            parser2 = Lark.deserialize(d, {}, {})
+            self.assertEqual(parser2.parse('ABC'), Tree('start', [Tree('b', [])]) )
+
+            namespace = {'Rule': Rule, 'TerminalDef': TerminalDef}
+            d, m = parser.memo_serialize(namespace.values())
+            parser3 = Lark.deserialize(d, namespace, m)
+            self.assertEqual(parser3.parse('ABC'), Tree('start', [Tree('b', [])]) )
+
+        def test_multi_start(self):
+            parser = _Lark('''
+                a: "x" "a"?
+                b: "x" "b"?
+            ''', start=['a', 'b'])
+
+            self.assertEqual(parser.parse('xa', 'a'), Tree('a', []))
+            self.assertEqual(parser.parse('xb', 'b'), Tree('b', []))
+
 
 
     _NAME = "Test" + PARSER.capitalize() + LEXER.capitalize()

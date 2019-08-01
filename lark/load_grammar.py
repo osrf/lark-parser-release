@@ -90,7 +90,7 @@ TERMINALS = {
     '_IGNORE': r'%ignore',
     '_DECLARE': r'%declare',
     '_IMPORT': r'%import',
-    'NUMBER': r'\d+',
+    'NUMBER': r'[+-]?\d+',
 }
 
 RULES = {
@@ -196,7 +196,7 @@ class EBNF_to_BNF(Transformer_InPlace):
                 mn = mx = int(args[0])
             else:
                 mn, mx = map(int, args)
-                if mx < mn:
+                if mx < mn or mn < 0:
                     raise GrammarError("Bad Range for %s (%d..%d isn't allowed)" % (rule, mn, mx))
             return ST('expansions', [ST('expansion', [rule] * n) for n in range(mn, mx+1)])
         assert False, op
@@ -205,7 +205,7 @@ class EBNF_to_BNF(Transformer_InPlace):
         keep_all_tokens = self.rule_options and self.rule_options.keep_all_tokens
 
         def will_not_get_removed(sym):
-            if isinstance(sym, NonTerminal): 
+            if isinstance(sym, NonTerminal):
                 return not sym.name.startswith('_')
             if isinstance(sym, Terminal):
                 return keep_all_tokens or not sym.filter_out
@@ -465,7 +465,7 @@ class Grammar:
         self.rule_defs = rule_defs
         self.ignore = ignore
 
-    def compile(self):
+    def compile(self, start):
         # We change the trees in-place (to support huge grammars)
         # So deepcopy allows calling compile more than once.
         term_defs = deepcopy(list(self.term_defs))
@@ -520,7 +520,7 @@ class Grammar:
                 if alias and name.startswith('_'):
                     raise GrammarError("Rule %s is marked for expansion (it starts with an underscore) and isn't allowed to have aliases (alias=%s)" % (name, alias))
 
-                empty_indices = [x==_EMPTY for i, x in enumerate(expansion)]
+                empty_indices = [x==_EMPTY for x in expansion]
                 if any(empty_indices):
                     exp_options = copy(options) if options else RuleOptions()
                     exp_options.empty_indices = empty_indices
@@ -546,6 +546,19 @@ class Grammar:
             # Remove duplicates
             compiled_rules = list(set(compiled_rules))
 
+
+        # Filter out unused rules
+        while True:
+            c = len(compiled_rules)
+            used_rules = {s for r in compiled_rules
+                                for s in r.expansion
+                                if isinstance(s, NonTerminal)
+                                and s != r.origin}
+            used_rules |= {NonTerminal(s) for s in start}
+            compiled_rules = [r for r in compiled_rules if r.origin in used_rules]
+            if len(compiled_rules) == c:
+                break
+
         # Filter out unused terminals
         used_terms = {t.name for r in compiled_rules
                              for t in r.expansion
@@ -562,9 +575,10 @@ def import_grammar(grammar_path, base_paths=[]):
         import_paths = base_paths + IMPORT_PATHS
         for import_path in import_paths:
             with suppress(IOError):
-                with open(os.path.join(import_path, grammar_path)) as f:
+                joined_path = os.path.join(import_path, grammar_path)
+                with open(joined_path) as f:
                     text = f.read()
-                grammar = load_grammar(text, grammar_path)
+                grammar = load_grammar(text, joined_path)
                 _imported_grammars[grammar_path] = grammar
                 break
         else:
@@ -597,6 +611,8 @@ def import_from_grammar_into_namespace(grammar, namespace, aliases):
         try:
             return aliases[name].value
         except KeyError:
+            if name[0] == '_':
+                return '_%s__%s' % (namespace, name[1:])
             return '%s__%s' % (namespace, name)
 
     to_import = list(bfs(aliases, rule_dependencies))
@@ -675,7 +691,7 @@ class GrammarLoader:
         callback = ParseTreeBuilder(rules, ST).create_callback()
         lexer_conf = LexerConf(terminals, ['WS', 'COMMENT'])
 
-        parser_conf = ParserConf(rules, callback, 'start')
+        parser_conf = ParserConf(rules, callback, ['start'])
         self.parser = LALR_TraditionalLexer(lexer_conf, parser_conf)
 
         self.canonize_tree = CanonizeTree()
@@ -722,7 +738,7 @@ class GrammarLoader:
         rule_defs = [options_from_rule(*x) for x in rule_defs]
 
         # Execute statements
-        ignore = []
+        ignore, imports = [], {}
         for (stmt,) in statements:
             if stmt.data == 'ignore':
                 t ,= stmt.children
@@ -731,22 +747,20 @@ class GrammarLoader:
                 if len(stmt.children) > 1:
                     path_node, arg1 = stmt.children
                 else:
-                    path_node ,= stmt.children
+                    path_node, = stmt.children
                     arg1 = None
 
                 if isinstance(arg1, Tree):  # Multi import
-                    dotted_path = path_node.children
+                    dotted_path = tuple(path_node.children)
                     names = arg1.children
-                    aliases = names  # Can't have aliased multi import, so all aliases will be the same as names
+                    aliases = dict(zip(names, names))  # Can't have aliased multi import, so all aliases will be the same as names
                 else:  # Single import
-                    dotted_path = path_node.children[:-1]
-                    names = [path_node.children[-1]]  # Get name from dotted path
-                    aliases = [arg1] if arg1 else names  # Aliases if exist
-
-                grammar_path = os.path.join(*dotted_path) + EXT
+                    dotted_path = tuple(path_node.children[:-1])
+                    name = path_node.children[-1]  # Get name from dotted path
+                    aliases = {name: arg1 or name}  # Aliases if exist
 
                 if path_node.data == 'import_lib':  # Import from library
-                    g = import_grammar(grammar_path)
+                    base_paths = []
                 else:  # Relative import
                     if grammar_name == '<string>':  # Import relative to script file path if grammar is coded in script
                         try:
@@ -756,16 +770,16 @@ class GrammarLoader:
                     else:
                         base_file = grammar_name  # Import relative to grammar file path if external grammar file
                     if base_file:
-                        base_path = os.path.split(base_file)[0]
+                        base_paths = [os.path.split(base_file)[0]]
                     else:
-                        base_path = os.path.abspath(os.path.curdir)
-                    g = import_grammar(grammar_path, base_paths=[base_path])
+                        base_paths = [os.path.abspath(os.path.curdir)]
 
-                aliases_dict = dict(zip(names, aliases))
-                new_td, new_rd = import_from_grammar_into_namespace(g, '__'.join(dotted_path), aliases_dict)
-
-                term_defs += new_td
-                rule_defs += new_rd
+                try:
+                    import_base_paths, import_aliases = imports[dotted_path]
+                    assert base_paths == import_base_paths, 'Inconsistent base_paths for %s.' % '.'.join(dotted_path)
+                    import_aliases.update(aliases)
+                except KeyError:
+                    imports[dotted_path] = base_paths, aliases
 
             elif stmt.data == 'declare':
                 for t in stmt.children:
@@ -773,6 +787,14 @@ class GrammarLoader:
             else:
                 assert False, stmt
 
+        # import grammars
+        for dotted_path, (base_paths, aliases) in imports.items():
+            grammar_path = os.path.join(*dotted_path) + EXT
+            g = import_grammar(grammar_path, base_paths=base_paths)
+            new_td, new_rd = import_from_grammar_into_namespace(g, '__'.join(dotted_path), aliases)
+
+            term_defs += new_td
+            rule_defs += new_rd
 
         # Verify correctness 1
         for name, _ in term_defs:
