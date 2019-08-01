@@ -1,3 +1,9 @@
+lark-parser (0.7.2-1) bionic; urgency=medium
+
+  * Imported Upstream version 0.7.2
+
+ -- Jose Luis Rivero <jrivero@osrfoundation.org>  Thu, 01 Aug 2019 19:12:00 +0200
+
 lark-parser (0.7.0-1) stretch; urgency=medium
 
   * New upstream version 0.7.0
