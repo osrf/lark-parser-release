@@ -3,12 +3,11 @@
 import re
 
 from .utils import Str, classify, get_regexp_width, Py36, Serialize
-from .exceptions import UnexpectedCharacters, LexError
+from .exceptions import UnexpectedCharacters, LexError, UnexpectedToken
 
 ###{standalone
 
 class Pattern(Serialize):
-    __serialize_fields__ = 'value', 'flags'
 
     def __init__(self, value, flags=()):
         self.value = value
@@ -41,8 +40,10 @@ class Pattern(Serialize):
 
 
 class PatternStr(Pattern):
+    __serialize_fields__ = 'value', 'flags'
+
     type = "str"
-    
+
     def to_regexp(self):
         return self._get_flags(re.escape(self.value))
 
@@ -52,6 +53,8 @@ class PatternStr(Pattern):
     max_width = min_width
 
 class PatternRE(Pattern):
+    __serialize_fields__ = 'value', 'flags', '_width'
+
     type = "re"
 
     def to_regexp(self):
@@ -98,7 +101,7 @@ class Token(Str):
 
         self.type = type_
         self.pos_in_stream = pos_in_stream
-        self.value = Str(value)
+        self.value = value
         self.line = line
         self.column = column
         self.end_line = end_line
@@ -163,36 +166,33 @@ class _Lex:
 
         while line_ctr.char_pos < len(stream):
             lexer = self.lexer
-            for mre, type_from_index in lexer.mres:
-                m = mre.match(stream, line_ctr.char_pos)
-                if not m:
-                    continue
-
-                t = None
-                value = m.group(0)
-                type_ = type_from_index[m.lastindex]
-                if type_ not in ignore_types:
-                    t = Token(type_, value, line_ctr.char_pos, line_ctr.line, line_ctr.column)
-                    if t.type in lexer.callback:
-                        t = lexer.callback[t.type](t)
-                        if not isinstance(t, Token):
-                            raise ValueError("Callbacks must return a token (returned %r)" % t)
-                    last_token = t
-                    yield t
-                else:
-                    if type_ in lexer.callback:
-                        t = Token(type_, value, line_ctr.char_pos, line_ctr.line, line_ctr.column)
-                        lexer.callback[type_](t)
-
-                line_ctr.feed(value, type_ in newline_types)
-                if t:
-                    t.end_line = line_ctr.line
-                    t.end_column = line_ctr.column
-
-                break
-            else:
-                allowed = {v for m, tfi in lexer.mres for v in tfi.values()}
+            res = lexer.match(stream, line_ctr.char_pos)
+            if not res:
+                allowed = {v for m, tfi in lexer.mres for v in tfi.values()} - ignore_types
+                if not allowed:
+                    allowed = {"<END-OF-FILE>"}
                 raise UnexpectedCharacters(stream, line_ctr.char_pos, line_ctr.line, line_ctr.column, allowed=allowed, state=self.state, token_history=last_token and [last_token])
+
+            value, type_ = res
+
+            t = None
+            if type_ not in ignore_types:
+                t = Token(type_, value, line_ctr.char_pos, line_ctr.line, line_ctr.column)
+                if t.type in lexer.callback:
+                    t = lexer.callback[t.type](t)
+                    if not isinstance(t, Token):
+                        raise ValueError("Callbacks must return a token (returned %r)" % t)
+                last_token = t
+                yield t
+            else:
+                if type_ in lexer.callback:
+                    t = Token(type_, value, line_ctr.char_pos, line_ctr.line, line_ctr.column)
+                    lexer.callback[type_](t)
+
+            line_ctr.feed(value, type_ in newline_types)
+            if t:
+                t.end_line = line_ctr.line
+                t.end_column = line_ctr.column
 
 
 class UnlessCallback:
@@ -265,13 +265,14 @@ def build_mres(terminals, match_whole=False):
     return _build_mres(terminals, len(terminals), match_whole)
 
 def _regexp_has_newline(r):
-    """Expressions that may indicate newlines in a regexp:
+    r"""Expressions that may indicate newlines in a regexp:
         - newlines (\n)
         - escaped newline (\\n)
         - anything but ([^...])
         - any-char (.) when the flag (?s) exists
+        - spaces (\s)
     """
-    return '\n' in r or '\\n' in r or '[^' in r or ('(?s' in r and '.' in r)
+    return '\n' in r or '\\n' in r or '\\s' in r or '[^' in r or ('(?s' in r and '.' in r)
 
 class Lexer(object):
     """Lexer interface
@@ -326,6 +327,11 @@ class TraditionalLexer(Lexer):
 
         self.mres = build_mres(terminals)
 
+    def match(self, stream, pos):
+        for mre, type_from_index in self.mres:
+            m = mre.match(stream, pos)
+            if m:
+                return m.group(0), type_from_index[m.lastindex]
 
     def lex(self, stream):
         return _Lex(self).lex(stream, self.newline_types, self.ignore_types)
@@ -363,9 +369,21 @@ class ContextualLexer(Lexer):
 
     def lex(self, stream):
         l = _Lex(self.lexers[self.parser_state], self.parser_state)
-        for x in l.lex(stream, self.root_lexer.newline_types, self.root_lexer.ignore_types):
-            yield x
-            l.lexer = self.lexers[self.parser_state]
-            l.state = self.parser_state
+        try:
+            for x in l.lex(stream, self.root_lexer.newline_types, self.root_lexer.ignore_types):
+                yield x
+                l.lexer = self.lexers[self.parser_state]
+                l.state = self.parser_state
+        except UnexpectedCharacters as e:
+            # In the contextual lexer, UnexpectedCharacters can mean that the terminal is defined,
+            # but not in the current context.
+            # This tests the input against the global context, to provide a nicer error.
+            root_match = self.root_lexer.match(stream, e.pos_in_stream)
+            if not root_match:
+                raise
+
+            value, type_ = root_match
+            t = Token(type_, value, e.pos_in_stream, e.line, e.column)
+            raise UnexpectedToken(t, e.allowed, state=e.state)
 
 ###}
