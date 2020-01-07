@@ -10,7 +10,7 @@ from .test_reconstructor import TestReconstructor
 try:
     from .test_nearley.test_nearley import TestNearley
 except ImportError:
-    pass
+    logging.warn("Warning: Skipping tests for Nearley (js2py required)")
 
 # from .test_selectors import TestSelectors
 # from .test_grammars import TestPythonG, TestConfigG
@@ -21,6 +21,7 @@ from .test_parser import (
         TestCykStandard,
         TestLalrContextual,
         TestEarleyDynamic,
+        TestLalrCustom,
 
         # TestFullEarleyStandard,
         TestFullEarleyDynamic,
